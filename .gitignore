@@ -1,3 +1,4 @@
-tetris
-tetris.o
-main.o
+*.class
+lanterna-3.1.2.jar
+highscore.txt
+.gemini/
