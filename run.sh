@@ -10,12 +10,12 @@ if [ ! -f "$JAR_NAME" ]; then
 fi
 
 # 2. Compilar
-echo "Compilando..."
-javac -cp "$JAR_NAME" Constants.java Tetris.java Main.java
+# Limpiar antiguos binarios para evitar conflictos
+rm -f *.class
+javac -nowarn -cp "$JAR_NAME" Config.java Tetris.java Game.java Main.java
 
 # 3. Ejecutar
 if [ $? -eq 0 ]; then
-    echo "Iniciando Tetris..."
     java -cp ".:$JAR_NAME" Main
 else
     echo "Error de compilación."

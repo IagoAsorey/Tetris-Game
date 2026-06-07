@@ -32,7 +32,7 @@ public class Tetris {
   private final Random random;
 
   public Tetris() {
-    this.board = new int[Constants.BOARD_HEIGHT][Constants.BOARD_WIDTH];
+    this.board = new int[Config.BOARD_HEIGHT][Config.BOARD_WIDTH];
     this.random = new Random();
     loadHighscore();
     initGame();
@@ -42,8 +42,8 @@ public class Tetris {
    * Initializes or resets the game state.
    */
   public void initGame() {
-    for (int i = 0; i < Constants.BOARD_HEIGHT; i++) {
-      for (int j = 0; j < Constants.BOARD_WIDTH; j++) {
+    for (int i = 0; i < Config.BOARD_HEIGHT; i++) {
+      for (int j = 0; j < Config.BOARD_WIDTH; j++) {
         board[i][j] = 0;
       }
     }
@@ -66,7 +66,6 @@ public class Tetris {
 
   /**
    * Implements the 7-bag randomization algorithm.
-   * Ensures all pieces appear once before repeating, avoiding long streaks.
    */
   private int pullFromBag() {
     if (bag.isEmpty()) {
@@ -79,29 +78,25 @@ public class Tetris {
   }
 
   private int getNum(int pieceType, int rotation, int bitOffset) {
-    return 3 & (Constants.PIECES[pieceType][rotation] >> bitOffset);
+    return 3 & (Config.PIECES[pieceType][rotation] >> bitOffset);
   }
 
   private void setPieceOnBoard(int x, int y, int r, int p, int value) {
     for (int i = 0; i < 8; i += 2) {
       int row = y + getNum(p, r, i * 2);
       int col = x + getNum(p, r, (i * 2) + 2);
-      if (row >= 0 && row < Constants.BOARD_HEIGHT && col >= 0 && col < Constants.BOARD_WIDTH) {
+      if (row >= 0 && row < Config.BOARD_HEIGHT && col >= 0 && col < Config.BOARD_WIDTH) {
         board[row][col] = value;
       }
     }
   }
 
   public boolean checkCollision(int x, int y, int r, int p) {
-    if (y + getNum(p, r, 18) >= Constants.BOARD_HEIGHT) {
-      return true;
-    }
-
     for (int i = 0; i < 8; i += 2) {
       int row = y + getNum(p, r, i * 2);
       int col = x + getNum(p, r, (i * 2) + 2);
 
-      if (col < 0 || col >= Constants.BOARD_WIDTH) {
+      if (col < 0 || col >= Config.BOARD_WIDTH || row >= Config.BOARD_HEIGHT) {
         return true;
       }
 
@@ -113,32 +108,26 @@ public class Tetris {
   }
 
   private void spawnPiece() {
-    // Get the next piece from the queue and replenish it
     curP = nextPieces.remove(0);
     nextPieces.add(pullFromBag());
     
     curY = 0;
     curR = 0;
-    // Spawn in the middle
-    curX = (Constants.BOARD_WIDTH / 2) - 1;
+    curX = (Config.BOARD_WIDTH / 2) - 1;
 
     if (checkCollision(curX, curY, curR, curP)) {
       gameOver = true;
     } else {
       setPieceOnBoard(curX, curY, curR, curP, curP + 1);
     }
-    canHold = true; // Reset hold capability for the new turn
+    canHold = true;
   }
 
-  /**
-   * Swaps current piece with the held piece.
-   */
   public void holdPiece() {
     if (gameOver || paused || !canHold) {
       return;
     }
 
-    // Remove current piece from board
     setPieceOnBoard(curX, curY, curR, curP, 0);
 
     if (heldPiece == -1) {
@@ -151,7 +140,7 @@ public class Tetris {
       
       curY = 0;
       curR = 0;
-      curX = (Constants.BOARD_WIDTH / 2) - 1;
+      curX = (Config.BOARD_WIDTH / 2) - 1;
       
       if (checkCollision(curX, curY, curR, curP)) {
         gameOver = true;
@@ -159,7 +148,7 @@ public class Tetris {
         setPieceOnBoard(curX, curY, curR, curP, curP + 1);
       }
     }
-    canHold = false; // Disable hold until next piece spawns
+    canHold = false;
   }
 
   public void step() {
@@ -196,9 +185,18 @@ public class Tetris {
     }
     setPieceOnBoard(curX, curY, curR, curP, 0);
     int nextR = (curR + 1) % 4;
+    
+    // Basic Wall Kick
     if (!checkCollision(curX, curY, nextR, curP)) {
       curR = nextR;
+    } else if (!checkCollision(curX + 1, curY, nextR, curP)) {
+      curX += 1;
+      curR = nextR;
+    } else if (!checkCollision(curX - 1, curY, nextR, curP)) {
+      curX -= 1;
+      curR = nextR;
     }
+    
     setPieceOnBoard(curX, curY, curR, curP, curP + 1);
   }
 
@@ -206,24 +204,20 @@ public class Tetris {
     if (gameOver || paused) {
       return;
     }
-    while (true) {
-      setPieceOnBoard(curX, curY, curR, curP, 0);
-      if (checkCollision(curX, curY + 1, curR, curP)) {
-        setPieceOnBoard(curX, curY, curR, curP, curP + 1);
-        break;
-      }
+    setPieceOnBoard(curX, curY, curR, curP, 0);
+    while (!checkCollision(curX, curY + 1, curR, curP)) {
       curY++;
-      setPieceOnBoard(curX, curY, curR, curP, curP + 1);
     }
+    setPieceOnBoard(curX, curY, curR, curP, curP + 1);
     clearLines();
     spawnPiece();
   }
 
   private void clearLines() {
     int linesClearedCount = 0;
-    for (int i = 0; i < Constants.BOARD_HEIGHT; i++) {
+    for (int i = 0; i < Config.BOARD_HEIGHT; i++) {
       boolean full = true;
-      for (int j = 0; j < Constants.BOARD_WIDTH; j++) {
+      for (int j = 0; j < Config.BOARD_WIDTH; j++) {
         if (board[i][j] == 0) {
           full = false;
           break;
@@ -232,16 +226,19 @@ public class Tetris {
 
       if (full) {
         for (int k = i; k > 0; k--) {
-          System.arraycopy(board[k - 1], 0, board[k], 0, Constants.BOARD_WIDTH);
+          System.arraycopy(board[k - 1], 0, board[k], 0, Config.BOARD_WIDTH);
         }
-        for (int j = 0; j < Constants.BOARD_WIDTH; j++) {
+        for (int j = 0; j < Config.BOARD_WIDTH; j++) {
           board[0][j] = 0;
         }
         linesClearedCount++;
       }
     }
     if (linesClearedCount > 0) {
-      score += linesClearedCount;
+      // Classic scoring: 100, 300, 500, 800
+      int[] points = {0, 100, 300, 500, 800};
+      score += points[Math.min(linesClearedCount, 4)];
+      
       if (score > highscore) {
         highscore = score;
         saveHighscore();
@@ -253,7 +250,6 @@ public class Tetris {
     paused = !paused;
   }
 
-  // Getters
   public int[][] getBoard() { return board; }
   public int getScore() { return score; }
   public int getHighscore() { return highscore; }
@@ -263,7 +259,7 @@ public class Tetris {
   public List<Integer> getNextPieces() { return nextPieces; }
 
   private void loadHighscore() {
-    try (BufferedReader br = new BufferedReader(new FileReader(Constants.HIGHSCORE_FILE))) {
+    try (BufferedReader br = new BufferedReader(new FileReader(Config.HIGHSCORE_FILE))) {
       String line = br.readLine();
       if (line != null) {
         highscore = Integer.parseInt(line.trim());
@@ -274,7 +270,7 @@ public class Tetris {
   }
 
   private void saveHighscore() {
-    try (PrintWriter pw = new PrintWriter(new FileWriter(Constants.HIGHSCORE_FILE))) {
+    try (PrintWriter pw = new PrintWriter(new FileWriter(Config.HIGHSCORE_FILE))) {
       pw.print(highscore);
     } catch (Exception e) {
     }
