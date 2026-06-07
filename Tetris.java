@@ -2,6 +2,9 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Random;
 
 /**
@@ -17,6 +20,12 @@ public class Tetris {
   private int curY;
   private int curR;
   private int curP;
+
+  // Advanced features state
+  private int heldPiece = -1; // -1 means no piece held
+  private boolean canHold = true; // Prevents holding multiple times in one turn
+  private final List<Integer> nextPieces = new ArrayList<>();
+  private final List<Integer> bag = new ArrayList<>();
 
   private boolean gameOver;
   private boolean paused;
@@ -42,21 +51,38 @@ public class Tetris {
     score = 0;
     gameOver = false;
     paused = false;
+    heldPiece = -1;
+    canHold = true;
+    nextPieces.clear();
+    bag.clear();
+    
+    // Fill the initial queue with 3 pieces
+    for (int i = 0; i < 3; i++) {
+      nextPieces.add(pullFromBag());
+    }
+    
     spawnPiece();
   }
 
   /**
-   * Extracts a specific 2-bit value from the encoded piece integer.
+   * Implements the 7-bag randomization algorithm.
+   * Ensures all pieces appear once before repeating, avoiding long streaks.
    */
+  private int pullFromBag() {
+    if (bag.isEmpty()) {
+      for (int i = 0; i < 7; i++) {
+        bag.add(i);
+      }
+      Collections.shuffle(bag, random);
+    }
+    return bag.remove(0);
+  }
+
   private int getNum(int pieceType, int rotation, int bitOffset) {
     return 3 & (Constants.PIECES[pieceType][rotation] >> bitOffset);
   }
 
-  /**
-   * Places or removes a piece on the board.
-   */
   private void setPieceOnBoard(int x, int y, int r, int p, int value) {
-    // Each piece consists of 4 blocks, each defined by an (r, c) pair in the bitmask
     for (int i = 0; i < 8; i += 2) {
       int row = y + getNum(p, r, i * 2);
       int col = x + getNum(p, r, (i * 2) + 2);
@@ -66,26 +92,19 @@ public class Tetris {
     }
   }
 
-  /**
-   * Checks if a piece collides with boundaries or other pieces.
-   */
   public boolean checkCollision(int x, int y, int r, int p) {
-    // Fast floor collision check using the encoded max height offset
     if (y + getNum(p, r, 18) >= Constants.BOARD_HEIGHT) {
       return true;
     }
 
-    // Detailed check for every block of the piece
     for (int i = 0; i < 8; i += 2) {
       int row = y + getNum(p, r, i * 2);
       int col = x + getNum(p, r, (i * 2) + 2);
 
-      // Boundary check (walls)
       if (col < 0 || col >= Constants.BOARD_WIDTH) {
         return true;
       }
 
-      // Check collision with fixed blocks already on the board
       if (row >= 0 && board[row][col] != 0) {
         return true;
       }
@@ -94,45 +113,72 @@ public class Tetris {
   }
 
   private void spawnPiece() {
+    // Get the next piece from the queue and replenish it
+    curP = nextPieces.remove(0);
+    nextPieces.add(pullFromBag());
+    
     curY = 0;
-    curP = random.nextInt(7);
-    curR = random.nextInt(4);
-    // Calculate random X ensuring the piece starts within the side walls
-    curX = random.nextInt(Constants.BOARD_WIDTH - getNum(curP, curR, 16));
+    curR = 0;
+    // Spawn in the middle
+    curX = (Constants.BOARD_WIDTH / 2) - 1;
 
     if (checkCollision(curX, curY, curR, curP)) {
       gameOver = true;
     } else {
       setPieceOnBoard(curX, curY, curR, curP, curP + 1);
     }
+    canHold = true; // Reset hold capability for the new turn
   }
 
   /**
-   * Advances the game logic by one gravity tick.
+   * Swaps current piece with the held piece.
    */
+  public void holdPiece() {
+    if (gameOver || paused || !canHold) {
+      return;
+    }
+
+    // Remove current piece from board
+    setPieceOnBoard(curX, curY, curR, curP, 0);
+
+    if (heldPiece == -1) {
+      heldPiece = curP;
+      spawnPiece();
+    } else {
+      int temp = curP;
+      curP = heldPiece;
+      heldPiece = temp;
+      
+      curY = 0;
+      curR = 0;
+      curX = (Constants.BOARD_WIDTH / 2) - 1;
+      
+      if (checkCollision(curX, curY, curR, curP)) {
+        gameOver = true;
+      } else {
+        setPieceOnBoard(curX, curY, curR, curP, curP + 1);
+      }
+    }
+    canHold = false; // Disable hold until next piece spawns
+  }
+
   public void step() {
     if (gameOver || paused) {
       return;
     }
 
-    // Temporarily remove piece to check if it can move down
     setPieceOnBoard(curX, curY, curR, curP, 0);
 
     if (checkCollision(curX, curY + 1, curR, curP)) {
-      // Piece landed: lock it, clear lines, and spawn next
       setPieceOnBoard(curX, curY, curR, curP, curP + 1);
       clearLines();
       spawnPiece();
     } else {
-      // Move one step down
       curY++;
       setPieceOnBoard(curX, curY, curR, curP, curP + 1);
     }
   }
 
-  /**
-   * Moves the current piece horizontally.
-   */
   public void moveLateral(int dx) {
     if (gameOver || paused) {
       return;
@@ -144,9 +190,6 @@ public class Tetris {
     setPieceOnBoard(curX, curY, curR, curP, curP + 1);
   }
 
-  /**
-   * Rotates the current piece.
-   */
   public void rotate() {
     if (gameOver || paused) {
       return;
@@ -159,14 +202,10 @@ public class Tetris {
     setPieceOnBoard(curX, curY, curR, curP, curP + 1);
   }
 
-  /**
-   * Drops the piece to the bottom instantly.
-   */
   public void hardDrop() {
     if (gameOver || paused) {
       return;
     }
-    // Continuous loop: move down until a collision is detected
     while (true) {
       setPieceOnBoard(curX, curY, curR, curP, 0);
       if (checkCollision(curX, curY + 1, curR, curP)) {
@@ -180,14 +219,10 @@ public class Tetris {
     spawnPiece();
   }
 
-  /**
-   * Scans the board for full lines and removes them by shifting rows down.
-   */
   private void clearLines() {
     int linesClearedCount = 0;
     for (int i = 0; i < Constants.BOARD_HEIGHT; i++) {
       boolean full = true;
-      // Check if the entire row is non-zero
       for (int j = 0; j < Constants.BOARD_WIDTH; j++) {
         if (board[i][j] == 0) {
           full = false;
@@ -196,18 +231,15 @@ public class Tetris {
       }
 
       if (full) {
-        // Shift all rows above this one down by one position
         for (int k = i; k > 0; k--) {
           System.arraycopy(board[k - 1], 0, board[k], 0, Constants.BOARD_WIDTH);
         }
-        // Top row becomes empty after the shift
         for (int j = 0; j < Constants.BOARD_WIDTH; j++) {
           board[0][j] = 0;
         }
         linesClearedCount++;
       }
     }
-    // Update score and highscore if lines were cleared
     if (linesClearedCount > 0) {
       score += linesClearedCount;
       if (score > highscore) {
@@ -221,25 +253,14 @@ public class Tetris {
     paused = !paused;
   }
 
-  public int[][] getBoard() {
-    return board;
-  }
-
-  public int getScore() {
-    return score;
-  }
-
-  public int getHighscore() {
-    return highscore;
-  }
-
-  public boolean isGameOver() {
-    return gameOver;
-  }
-
-  public boolean isPaused() {
-    return paused;
-  }
+  // Getters
+  public int[][] getBoard() { return board; }
+  public int getScore() { return score; }
+  public int getHighscore() { return highscore; }
+  public boolean isGameOver() { return gameOver; }
+  public boolean isPaused() { return paused; }
+  public int getHeldPiece() { return heldPiece; }
+  public List<Integer> getNextPieces() { return nextPieces; }
 
   private void loadHighscore() {
     try (BufferedReader br = new BufferedReader(new FileReader(Constants.HIGHSCORE_FILE))) {
@@ -256,7 +277,6 @@ public class Tetris {
     try (PrintWriter pw = new PrintWriter(new FileWriter(Constants.HIGHSCORE_FILE))) {
       pw.print(highscore);
     } catch (Exception e) {
-      // In a real application, consider using a logger.
     }
   }
 }

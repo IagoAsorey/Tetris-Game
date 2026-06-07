@@ -7,6 +7,7 @@ import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
 import com.googlecode.lanterna.terminal.Terminal;
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Entry point for the Tetris game. Handles the terminal UI and game loop.
@@ -23,7 +24,8 @@ public class Main {
     TextColor.ANSI.WHITE // Piece 7
   };
 
-  private static final long GRAVITY_INTERVAL_MS = 500;
+  private static final long INITIAL_GRAVITY_INTERVAL_MS = 700;
+  private static final long MIN_GRAVITY_INTERVAL_MS = 150;
   private static final long LOOP_SLEEP_MS = 10;
 
   public static void main(String[] args) {
@@ -49,10 +51,17 @@ public class Main {
           }
         }
 
+        // Calculate current gravity speed based on score (Slower progression)
+        // Interval decreases by 20ms every 10 points
+        long currentGravityInterval = Math.max(
+            MIN_GRAVITY_INTERVAL_MS,
+            INITIAL_GRAVITY_INTERVAL_MS - (game.getScore() / 5) * 50
+        );
+
         // Automatic downward movement (Gravity)
         if (!game.isGameOver() && !game.isPaused()) {
           long now = System.currentTimeMillis();
-          if (now - lastGravityTick >= GRAVITY_INTERVAL_MS) {
+          if (now - lastGravityTick >= currentGravityInterval) {
             game.step();
             lastGravityTick = now;
           }
@@ -105,7 +114,10 @@ public class Main {
           case 'w':
             game.rotate();
             break;
-          case 's':
+          case 'c':
+            game.holdPiece();
+            break;
+          case ' ':
             game.hardDrop();
             break;
           default:
@@ -122,7 +134,7 @@ public class Main {
         } else if (type == KeyType.ArrowUp) {
           game.rotate();
         } else if (type == KeyType.ArrowDown) {
-          game.hardDrop();
+          game.step(); // Soft drop: move one step down
         }
       }
     }
@@ -135,8 +147,8 @@ public class Main {
   private static void draw(Screen screen, Tetris game) throws IOException {
     screen.clear();
 
-    // Base offset for the game board rendering
-    final int startX = 5;
+    // Shifted right to make room for HOLD panel
+    final int startX = 15;
     final int startY = 2;
 
     // Draw borders: use | for sides and - for top/bottom
@@ -150,14 +162,13 @@ public class Main {
       screen.setCharacter(startX + j, startY + Constants.BOARD_HEIGHT + 1, new TextCharacter('-'));
     }
 
-    // Draw active board: iterate through the logical grid
+    // Draw active board
     int[][] board = game.getBoard();
     for (int i = 0; i < Constants.BOARD_HEIGHT; i++) {
       for (int j = 0; j < Constants.BOARD_WIDTH; j++) {
         int cell = board[i][j];
         if (cell != 0) {
           TextColor color = PIECE_COLORS[cell];
-          // Use two spaces to create a square-like block in the terminal
           TextCharacter block = new TextCharacter(' ', TextColor.ANSI.DEFAULT, color);
           screen.setCharacter(startX + 1 + j * 2, startY + 1 + i, block);
           screen.setCharacter(startX + 2 + j * 2, startY + 1 + i, block);
@@ -165,9 +176,26 @@ public class Main {
       }
     }
 
-    // Draw HUD: Score and Best score
-    drawText(screen, startX + Constants.BOARD_WIDTH * 2 + 4, startY + 2, "Score: " + game.getScore());
-    drawText(screen, startX + Constants.BOARD_WIDTH * 2 + 4, startY + 3, "Best:  " + game.getHighscore());
+    // --- HOLD PANEL (Left Side) ---
+    drawText(screen, startX - 10, startY, " HOLD ");
+    drawBox(screen, startX - 12, startY + 1, 4, 10);
+    int held = game.getHeldPiece();
+    if (held != -1) {
+      drawPiecePreview(screen, startX - 10, startY + 2, held);
+    }
+
+    // --- HUD (Right Side) ---
+    int hudX = startX + Constants.BOARD_WIDTH * 2 + 4;
+    drawText(screen, hudX, startY + 1, "Score: " + game.getScore());
+    drawText(screen, hudX, startY + 2, "Best:  " + game.getHighscore());
+
+    // --- NEXT PANEL (Right Side) ---
+    drawText(screen, hudX, startY + 5, " NEXT ");
+    drawBox(screen, hudX - 1, startY + 6, 12, 10);
+    List<Integer> next = game.getNextPieces();
+    for (int i = 0; i < next.size(); i++) {
+      drawPiecePreview(screen, hudX + 1, startY + 7 + (i * 4), next.get(i));
+    }
 
     // Game state overlays
     if (game.isPaused()) {
@@ -183,9 +211,29 @@ public class Main {
     screen.refresh();
   }
 
-  /**
-   * Helper method to print strings to the Lanterna screen character by character.
-   */
+  private static void drawBox(Screen screen, int x, int y, int h, int w) {
+    for (int i = 0; i < h; i++) {
+      screen.setCharacter(x, y + i, new TextCharacter('|'));
+      screen.setCharacter(x + w - 1, y + i, new TextCharacter('|'));
+    }
+    for (int j = 0; j < w; j++) {
+      screen.setCharacter(x + j, y, new TextCharacter('-'));
+      screen.setCharacter(x + j, y + h - 1, new TextCharacter('-'));
+    }
+  }
+
+  private static void drawPiecePreview(Screen screen, int x, int y, int pieceType) {
+    TextColor color = PIECE_COLORS[pieceType + 1];
+    TextCharacter block = new TextCharacter(' ', TextColor.ANSI.DEFAULT, color);
+    int rotation = 0; // Use first rotation for preview
+    for (int i = 0; i < 8; i += 2) {
+      int rowOffset = 3 & (Constants.PIECES[pieceType][rotation] >> (i * 2));
+      int colOffset = 3 & (Constants.PIECES[pieceType][rotation] >> ((i * 2) + 2));
+      screen.setCharacter(x + colOffset * 2, y + rowOffset, block);
+      screen.setCharacter(x + colOffset * 2 + 1, y + rowOffset, block);
+    }
+  }
+
   private static void drawText(Screen screen, int x, int y, String text) {
     for (int i = 0; i < text.length(); i++) {
       screen.setCharacter(x + i, y, new TextCharacter(text.charAt(i)));
