@@ -1,0 +1,20 @@
+public class Constants {
+    // Dimensiones del tablero de juego
+    public static final int BOARD_WIDTH = 10;
+    public static final int BOARD_HEIGHT = 20;
+
+    // Nombre del archivo donde se guarda el récord
+    public static final String HIGHSCORE_FILE = "highscore.txt";
+
+    // Datos lógicos de las 7 piezas originales del Tetris.
+    // Cada pieza tiene 4 rotaciones codificadas en números enteros de 32 bits.
+    public static final int[][] PIECES = {
+        {431424, 598356, 431424, 598356},
+        {427089, 615696, 427089, 615696},
+        {348480, 348480, 348480, 348480},
+        {599636, 431376, 598336, 432192},
+        {411985, 610832, 415808, 595540},
+        {247872, 799248, 247872, 799248},
+        {614928, 399424, 615744, 428369}
+    };
+}
