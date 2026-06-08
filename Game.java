@@ -5,21 +5,16 @@ import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
 import com.googlecode.lanterna.screen.Screen;
-import com.googlecode.lanterna.screen.TerminalScreen;
-import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
-import com.googlecode.lanterna.terminal.Terminal;
 import java.io.IOException;
 import java.util.List;
 
 /**
- * Game engine for the Tetris game.
- * Coordinates game state, input handling, and rendering.
+ * Coordinates input, timing, rendering, and high-level screen flow.
  */
 public class Game {
-  private Screen screen;
-  private Tetris tetris;
+  private final Screen screen;
+  private final Tetris tetris;
   private long lastGravityTick;
-  private int frame;
 
   private static final TextColor[] PIECE_COLORS = {
     TextColor.ANSI.BLACK, // Background
@@ -35,14 +30,13 @@ public class Game {
   public Game(Screen screen) {
     this.screen = screen;
     this.tetris = new Tetris();
-    this.frame = 0;
   }
 
+  /** Starts the main game loop and returns only after the player quits. */
   public void run() throws IOException, InterruptedException {
     lastGravityTick = System.currentTimeMillis();
 
     while (true) {
-      // Process Input
       KeyStroke keyStroke = screen.pollInput();
       String action = null;
       if (keyStroke != null) {
@@ -59,7 +53,6 @@ public class Game {
         }
       }
 
-      // Update Logic
       if (!tetris.isGameOver() && !tetris.isPaused()) {
         long currentInterval = (long) Math.max(
             Config.MIN_GRAVITY_INTERVAL_MS,
@@ -73,10 +66,8 @@ public class Game {
         }
       }
 
-      // Draw
       if (tetris.isGameOver()) {
         drawGameOver();
-        // Wait for input after game over
         KeyStroke ks = screen.readInput();
         char c = Character.toLowerCase(ks.getCharacter() != null ? ks.getCharacter() : ' ');
         if (c == 'r') {
@@ -86,10 +77,13 @@ public class Game {
           break;
         }
       } else {
-        draw();
+        if (!draw()) {
+          // Terminal too small, just wait and loop
+          Thread.sleep(100);
+          continue;
+        }
       }
 
-      frame++;
       Thread.sleep(Config.LOOP_SLEEP_MS);
     }
   }
@@ -108,7 +102,7 @@ public class Game {
         switch (c) {
           case 'a': tetris.moveLateral(-1); break;
           case 'd': tetris.moveLateral(1); break;
-          case 's': tetris.step(); break; // Soft drop
+          case 's': tetris.step(); break;
           case 'w': tetris.rotate(); break;
           case 'c': tetris.holdPiece(); break;
           case ' ': tetris.hardDrop(); break;
@@ -127,60 +121,66 @@ public class Game {
   }
 
   private void drawBorder(int x, int y, int h, int w) {
-    screen.setCharacter(x, y, new TextCharacter(Config.BORDER_TL, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
-    screen.setCharacter(x + w - 1, y, new TextCharacter(Config.BORDER_TR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
-    screen.setCharacter(x, y + h - 1, new TextCharacter(Config.BORDER_BL, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
-    screen.setCharacter(x + w - 1, y + h - 1, new TextCharacter(Config.BORDER_BR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+    screen.setCharacter(x, y, makeChar(Config.BORDER_TL, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+    screen.setCharacter(x + w - 1, y, makeChar(Config.BORDER_TR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+    screen.setCharacter(x, y + h - 1, makeChar(Config.BORDER_BL, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+    screen.setCharacter(x + w - 1, y + h - 1, makeChar(Config.BORDER_BR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
     
     for (int i = 1; i < w - 1; i++) {
-      screen.setCharacter(x + i, y, new TextCharacter(Config.BORDER_HOR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
-      screen.setCharacter(x + i, y + h - 1, new TextCharacter(Config.BORDER_HOR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+      screen.setCharacter(x + i, y, makeChar(Config.BORDER_HOR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+      screen.setCharacter(x + i, y + h - 1, makeChar(Config.BORDER_HOR, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
     }
     for (int i = 1; i < h - 1; i++) {
-      screen.setCharacter(x, y + i, new TextCharacter(Config.BORDER_VER, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
-      screen.setCharacter(x + w - 1, y + i, new TextCharacter(Config.BORDER_VER, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+      screen.setCharacter(x, y + i, makeChar(Config.BORDER_VER, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
+      screen.setCharacter(x + w - 1, y + i, makeChar(Config.BORDER_VER, Config.BORDER_COLOR, TextColor.ANSI.DEFAULT));
     }
   }
 
-  private void draw() throws IOException {
+  private boolean draw() throws IOException {
     screen.doResizeIfNecessary();
-    screen.clear();
     TerminalSize size = screen.getTerminalSize();
     int termH = size.getRows();
     int termW = size.getColumns();
 
+    if (termW < Config.MIN_TERM_W || termH < Config.MIN_TERM_H) {
+      screen.clear();
+      drawText(0, 0, "Terminal too small: " + termW + "x" + termH, Config.HUD_COLOR, true);
+      drawText(0, 1, "Need at least " + Config.MIN_TERM_W + "x" + Config.MIN_TERM_H, Config.HUD_COLOR, true);
+      drawText(0, 2, "Resize to continue...", Config.HUD_COLOR, true);
+      screen.refresh();
+      return false;
+    }
+
+    screen.clear();
     int startY = (termH - Config.BOARD_HEIGHT) / 2;
     if (startY < 3) startY = 3;
     int startX = (termW - Config.BOARD_WIDTH * 2) / 2;
 
-    // Header
     drawText(startX + Config.BOARD_WIDTH - Config.TITLE.length()/2, startY - 3, Config.TITLE, Config.TITLE_COLOR, true);
     drawText(startX, startY - 1, "Score: " + tetris.getScore(), Config.HUD_COLOR, true);
     String best = "Best Score: " + tetris.getHighscore();
     drawText(startX + Config.BOARD_WIDTH * 2 - best.length() + 2, startY - 1, best, Config.HUD_COLOR, true);
 
-    // Border
     drawBorder(startX, startY, Config.BOARD_HEIGHT + 2, Config.BOARD_WIDTH * 2 + 2);
 
-    // Board
     int[][] board = tetris.getBoard();
     for (int i = 0; i < Config.BOARD_HEIGHT; i++) {
       for (int j = 0; j < Config.BOARD_WIDTH; j++) {
         int cell = board[i][j];
         if (cell != 0) {
           TextColor color = PIECE_COLORS[cell];
-          TextCharacter block = new TextCharacter(' ', TextColor.ANSI.DEFAULT, color);
+          TextCharacter block = makeChar(' ', TextColor.ANSI.DEFAULT, color);
           screen.setCharacter(startX + 1 + j * 2, startY + 1 + i, block);
           screen.setCharacter(startX + 2 + j * 2, startY + 1 + i, block);
         }
       }
     }
 
-    // Panels
     drawHold(startX - 14, startY + 1);
     drawNext(startX + Config.BOARD_WIDTH * 2 + 4, startY + 1);
 
     screen.refresh();
+    return true;
   }
 
   private void drawHold(int x, int y) {
@@ -201,7 +201,7 @@ public class Game {
 
   private void drawPiecePreview(int x, int y, int pieceType) {
     TextColor color = PIECE_COLORS[pieceType + 1];
-    TextCharacter block = new TextCharacter(' ', TextColor.ANSI.DEFAULT, color);
+    TextCharacter block = makeChar(' ', TextColor.ANSI.DEFAULT, color);
     int rotation = 0;
     for (int i = 0; i < 8; i += 2) {
       int r = 3 & (Config.PIECES[pieceType][rotation] >> (i * 2));
@@ -212,7 +212,7 @@ public class Game {
   }
 
   private void drawGameOver() throws IOException {
-    draw();
+    if (!draw()) return;
     String[] msgs = {
       "GAME OVER",
       "Score: " + tetris.getScore(),
@@ -224,9 +224,17 @@ public class Game {
     drawMenu(msgs, Config.GAME_OVER_COLOR);
   }
 
-  private String pauseScreen() throws IOException {
+  private String pauseScreen() throws IOException, InterruptedException {
     while (true) {
-      draw();
+      if (!draw()) {
+        KeyStroke ks = screen.pollInput();
+        if (ks != null) {
+          char c = Character.toLowerCase(ks.getCharacter() != null ? ks.getCharacter() : ' ');
+          if (c == 'q') return "quit";
+        }
+        Thread.sleep(100);
+        continue;
+      }
       String[] msgs = {
         "PAUSED",
         "Score: " + tetris.getScore(),
@@ -263,9 +271,20 @@ public class Game {
 
   private void drawText(int x, int y, String text, TextColor color, boolean bold) {
     for (int i = 0; i < text.length(); i++) {
-      TextCharacter tc = new TextCharacter(text.charAt(i), color, TextColor.ANSI.DEFAULT);
-      if (bold) tc = tc.withModifier(SGR.BOLD);
+      TextCharacter tc = makeChar(
+          text.charAt(i),
+          color,
+          TextColor.ANSI.DEFAULT,
+          bold ? SGR.BOLD : null
+      );
       screen.setCharacter(x + i, y, tc);
     }
+  }
+
+  private TextCharacter makeChar(char character, TextColor foreground, TextColor background, SGR... modifiers) {
+    if (modifiers.length == 1 && modifiers[0] == null) {
+      return TextCharacter.fromCharacter(character, foreground, background)[0];
+    }
+    return TextCharacter.fromCharacter(character, foreground, background, modifiers)[0];
   }
 }

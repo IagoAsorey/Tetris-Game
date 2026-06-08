@@ -1,16 +1,21 @@
 import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.FileNotFoundException;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
 /**
- * Manages the internal game state, including the board, pieces, score, and collisions.
+ * Owns all gameplay state: board occupancy, active piece, scoring, hold queue, and collision rules.
  */
-public class Tetris {
+public final class Tetris {
   private final int[][] board;
   private int score;
   private int highscore;
@@ -35,13 +40,15 @@ public class Tetris {
     this.board = new int[Config.BOARD_HEIGHT][Config.BOARD_WIDTH];
     this.random = new Random();
     loadHighscore();
-    initGame();
+    resetGameState();
   }
 
-  /**
-   * Initializes or resets the game state.
-   */
+  /** Initializes or resets the game state for a new round. */
   public void initGame() {
+    resetGameState();
+  }
+
+  private void resetGameState() {
     for (int i = 0; i < Config.BOARD_HEIGHT; i++) {
       for (int j = 0; j < Config.BOARD_WIDTH; j++) {
         board[i][j] = 0;
@@ -64,9 +71,7 @@ public class Tetris {
     spawnPiece();
   }
 
-  /**
-   * Implements the 7-bag randomization algorithm.
-   */
+  /** Returns the next piece using the standard 7-bag randomization algorithm. */
   private int pullFromBag() {
     if (bag.isEmpty()) {
       for (int i = 0; i < 7; i++) {
@@ -91,6 +96,15 @@ public class Tetris {
     }
   }
 
+  /**
+   * Checks whether a piece would collide at the provided board position.
+   *
+   * @param x target column
+   * @param y target row
+   * @param r target rotation
+   * @param p piece type
+   * @return true when the piece would touch a wall, floor, or locked block
+   */
   public boolean checkCollision(int x, int y, int r, int p) {
     for (int i = 0; i < 8; i += 2) {
       int row = y + getNum(p, r, i * 2);
@@ -123,6 +137,7 @@ public class Tetris {
     canHold = true;
   }
 
+  /** Stores or swaps the current piece, limited to one hold per spawned piece. */
   public void holdPiece() {
     if (gameOver || paused || !canHold) {
       return;
@@ -151,6 +166,7 @@ public class Tetris {
     canHold = false;
   }
 
+  /** Advances the active piece by one gravity step. */
   public void step() {
     if (gameOver || paused) {
       return;
@@ -168,6 +184,7 @@ public class Tetris {
     }
   }
 
+  /** Moves the active piece horizontally when the destination is available. */
   public void moveLateral(int dx) {
     if (gameOver || paused) {
       return;
@@ -179,6 +196,7 @@ public class Tetris {
     setPieceOnBoard(curX, curY, curR, curP, curP + 1);
   }
 
+  /** Rotates the active piece clockwise with a small wall-kick fallback. */
   public void rotate() {
     if (gameOver || paused) {
       return;
@@ -200,6 +218,7 @@ public class Tetris {
     setPieceOnBoard(curX, curY, curR, curP, curP + 1);
   }
 
+  /** Drops the active piece to the lowest valid row and locks it immediately. */
   public void hardDrop() {
     if (gameOver || paused) {
       return;
@@ -215,7 +234,7 @@ public class Tetris {
 
   private void clearLines() {
     int linesClearedCount = 0;
-    for (int i = 0; i < Config.BOARD_HEIGHT; i++) {
+    for (int i = Config.BOARD_HEIGHT - 1; i >= 0; i--) {
       boolean full = true;
       for (int j = 0; j < Config.BOARD_WIDTH; j++) {
         if (board[i][j] == 0) {
@@ -232,6 +251,7 @@ public class Tetris {
           board[0][j] = 0;
         }
         linesClearedCount++;
+        i++;
       }
     }
     if (linesClearedCount > 0) {
@@ -246,33 +266,50 @@ public class Tetris {
     }
   }
 
-  public void togglePause() {
-    paused = !paused;
-  }
-
+  /** Returns the mutable board used by the renderer. */
   public int[][] getBoard() { return board; }
+
+  /** Returns the current score. */
   public int getScore() { return score; }
+
+  /** Returns the persisted high score loaded at startup. */
   public int getHighscore() { return highscore; }
+
+  /** Returns whether no more pieces can be spawned. */
   public boolean isGameOver() { return gameOver; }
+
+  /** Returns whether gameplay updates are paused. */
   public boolean isPaused() { return paused; }
+
+  /** Returns the held piece index, or -1 when no piece is held. */
   public int getHeldPiece() { return heldPiece; }
-  public List<Integer> getNextPieces() { return nextPieces; }
+
+  /** Returns a read-only view of the next-piece queue. */
+  public List<Integer> getNextPieces() { return Collections.unmodifiableList(nextPieces); }
 
   private void loadHighscore() {
-    try (BufferedReader br = new BufferedReader(new FileReader(Config.HIGHSCORE_FILE))) {
+    try (BufferedReader br = new BufferedReader(new InputStreamReader(
+        new FileInputStream(Config.HIGHSCORE_FILE),
+        StandardCharsets.UTF_8))) {
       String line = br.readLine();
       if (line != null) {
         highscore = Integer.parseInt(line.trim());
       }
-    } catch (Exception e) {
+    } catch (FileNotFoundException | NumberFormatException e) {
+      highscore = 0;
+    } catch (IOException e) {
+      System.err.println("Unable to read high score: " + e.getMessage());
       highscore = 0;
     }
   }
 
   private void saveHighscore() {
-    try (PrintWriter pw = new PrintWriter(new FileWriter(Config.HIGHSCORE_FILE))) {
+    try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(
+        new FileOutputStream(Config.HIGHSCORE_FILE),
+        StandardCharsets.UTF_8))) {
       pw.print(highscore);
-    } catch (Exception e) {
+    } catch (IOException e) {
+      System.err.println("Unable to save high score: " + e.getMessage());
     }
   }
 }
